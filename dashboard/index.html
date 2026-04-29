@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hermes Observatory</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; color: #e0e0e0; font-family: 'SF Mono', 'Fira Code', monospace; }
+  header { padding: 24px 32px; border-bottom: 1px solid #1e1e2e; display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 20px; color: #cba6f7; letter-spacing: 2px; }
+  .live-dot { width: 8px; height: 8px; background: #a6e3a1; border-radius: 50%; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; padding: 24px 32px; }
+  .card { background: #12121a; border: 1px solid #1e1e2e; border-radius: 12px; padding: 20px; }
+  .card.wide { grid-column: span 2; }
+  .card.full { grid-column: 1/-1; }
+  .card h3 { font-size: 11px; color: #6c7086; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 12px; }
+  .metric { font-size: 32px; font-weight: bold; color: #cba6f7; }
+  .metric.green { color: #a6e3a1; }
+  .metric.yellow { color: #f9e2af; }
+  .metric.red { color: #f38ba8; }
+  .sub { font-size: 12px; color: #6c7086; margin-top: 4px; }
+  .cost-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #1e1e2e; font-size: 13px; }
+  .cost-row:last-child { border-bottom: none; }
+  .cost-label { color: #89b4fa; }
+  .cost-value { color: #f38ba8; }
+  .cost-value.free { color: #a6e3a1; }
+  .tool-bar { margin: 6px 0; }
+  .tool-name { font-size: 12px; color: #89dceb; margin-bottom: 3px; }
+  .bar-bg { background: #1e1e2e; border-radius: 4px; height: 8px; }
+  .bar-fill { background: #cba6f7; border-radius: 4px; height: 8px; transition: width 0.5s; }
+  .bar-fill.unused { background: #313244; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin: 2px; }
+  .tag.used { background: #1e1e2e; color: #cba6f7; border: 1px solid #cba6f7; }
+  .tag.unused { background: #1e1e2e; color: #45475a; border: 1px solid #313244; }
+  .request-row { display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid #1e1e2e; font-size: 12px; align-items: center; }
+  .request-row:last-child { border-bottom: none; }
+  .badge { padding: 2px 6px; border-radius: 4px; font-size: 10px; }
+  .badge.stop { background: #1e3a2f; color: #a6e3a1; }
+  .badge.length { background: #3a2f1e; color: #f9e2af; }
+  .badge.unknown { background: #1e1e2e; color: #6c7086; }
+  .badge.tool { background: #2f1e3a; color: #cba6f7; }
+  canvas { max-height: 200px; }
+  .refresh { font-size: 11px; color: #45475a; margin-left: auto; }
+</style>
+</head>
+<body>
+<header>
+  <div class="live-dot"></div>
+  <h1>⚗ HERMES OBSERVATORY</h1>
+  <span class="refresh" id="lastUpdate">Connecting...</span>
+</header>
+
+<div class="grid" id="summary">
+  <div class="card"><h3>Total Requests</h3><div class="metric" id="totalReqs">-</div></div>
+  <div class="card"><h3>Avg Latency</h3><div class="metric yellow" id="avgLatency">-</div></div>
+  <div class="card"><h3>Total Tokens</h3><div class="metric" id="totalTokens">-</div></div>
+  <div class="card"><h3>Tool Coverage</h3><div class="metric green" id="coverage">-</div><div class="sub" id="coverageSub"></div></div>
+</div>
+
+<div class="grid">
+  <!-- Cost Comparison -->
+  <div class="card">
+    <h3>💰 Cost Comparison (your usage)</h3>
+    <div id="costRows"></div>
+  </div>
+
+  <!-- Latency Distribution -->
+  <div class="card">
+    <h3>⚡ Latency Distribution</h3>
+    <canvas id="latencyChart"></canvas>
+  </div>
+
+  <!-- Token breakdown -->
+  <div class="card">
+    <h3>🧮 Token Breakdown</h3>
+    <canvas id="tokenChart"></canvas>
+  </div>
+
+  <!-- Tool usage -->
+  <div class="card wide">
+    <h3>🔧 Tool Usage (called vs available)</h3>
+    <div id="toolBars"></div>
+  </div>
+
+  <!-- Coverage map -->
+  <div class="card full">
+    <h3>🗺️ Tool Surface Coverage</h3>
+    <div id="toolTags" style="padding-top:8px"></div>
+  </div>
+
+  <!-- Recent requests -->
+  <div class="card full">
+    <h3>📡 Recent Requests</h3>
+    <div id="recentRequests"></div>
+  </div>
+</div>
+
+<script>
+let latencyChart, tokenChart;
+
+function initCharts() {
+  const chartDefaults = {
+    plugins: { legend: { labels: { color: '#6c7086', font: { size: 11 } } } },
+    scales: { x: { ticks: { color: '#6c7086' }, grid: { color: '#1e1e2e' } }, y: { ticks: { color: '#6c7086' }, grid: { color: '#1e1e2e' } } }
+  };
+
+  latencyChart = new Chart(document.getElementById('latencyChart'), {
+    type: 'bar',
+    data: {
+      labels: ['< 1s (fast)', '1-3s (medium)', '> 3s (slow)'],
+      datasets: [{ label: 'Requests', data: [0,0,0], backgroundColor: ['#a6e3a1','#f9e2af','#f38ba8'] }]
+    },
+    options: { ...chartDefaults, plugins: { legend: { display: false } } }
+  });
+
+  tokenChart = new Chart(document.getElementById('tokenChart'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Prompt', 'Completion'],
+      datasets: [{ data: [0,0], backgroundColor: ['#89b4fa','#cba6f7'], borderWidth: 0 }]
+    },
+    options: { plugins: { legend: { labels: { color: '#6c7086' } } }, cutout: '70%' }
+  });
+}
+
+function fmt(n) { return n?.toLocaleString() || '0'; }
+
+async function refresh() {
+  try {
+    const r = await fetch('/observatory/stats');
+    const d = await r.json();
+
+    // Summary
+    document.getElementById('totalReqs').textContent = fmt(d.summary.total_requests);
+    document.getElementById('avgLatency').textContent = d.summary.avg_latency_ms + 'ms';
+    document.getElementById('totalTokens').textContent = fmt(d.summary.total_tokens);
+    document.getElementById('coverage').textContent = d.tool_coverage.coverage_pct + '%';
+    document.getElementById('coverageSub').textContent = `${d.tool_coverage.total_called} / ${d.tool_coverage.total_available} tools used`;
+    document.getElementById('lastUpdate').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+
+    // Costs
+    const costs = d.cost_comparison;
+    document.getElementById('costRows').innerHTML = Object.entries(costs).map(([k,v]) => `
+      <div class="cost-row">
+        <span class="cost-label">${k.replace(/_/g,' ')}</span>
+        <span class="cost-value ${v.includes('$0') ? 'free' : ''}">${v}</span>
+      </div>`).join('');
+
+    // Latency chart
+    const ld = d.latency_distribution;
+    latencyChart.data.datasets[0].data = [ld.fast_under_1s, ld.medium_1_3s, ld.slow_over_3s];
+    latencyChart.update();
+
+    // Token chart
+    tokenChart.data.datasets[0].data = [d.summary.total_prompt_tokens, d.summary.total_completion_tokens];
+    tokenChart.update();
+
+    // Tool bars
+    const maxCalls = Math.max(...Object.values(d.tool_coverage.call_counts), 1);
+    document.getElementById('toolBars').innerHTML = Object.entries(d.tool_coverage.call_counts)
+      .sort((a,b) => b[1]-a[1])
+      .map(([name, count]) => `
+        <div class="tool-bar">
+          <div class="tool-name">${name} <span style="color:#6c7086">(${count}x)</span></div>
+          <div class="bar-bg"><div class="bar-fill" style="width:${(count/maxCalls*100)}%"></div></div>
+        </div>`).join('');
+
+    // Tool tags - full surface map
+    const used = new Set(Object.keys(d.tool_coverage.call_counts));
+    const allTools = [...used, ...d.tool_coverage.never_called];
+    document.getElementById('toolTags').innerHTML = allTools.map(t =>
+      `<span class="tag ${used.has(t) ? 'used' : 'unused'}">${t}</span>`).join('');
+
+    // Recent requests
+    document.getElementById('recentRequests').innerHTML = d.recent_requests.map(r => {
+      const tc = JSON.parse(r.tool_calls || '[]');
+      const time = new Date(r.timestamp).toLocaleTimeString();
+      return `<div class="request-row">
+        <span style="color:#45475a">${time}</span>
+        <span style="color:#89b4fa">${r.model}</span>
+        <span style="color:#6c7086">${r.latency_ms?.toFixed(0)}ms</span>
+        <span style="color:#f9e2af">${r.total_tokens || 0} tok</span>
+        <span class="badge ${r.finish_reason}">${r.finish_reason}</span>
+        ${tc.map(t => `<span class="badge tool">🔧 ${t.name}</span>`).join('')}
+      </div>`;
+    }).join('');
+
+  } catch(e) {
+    document.getElementById('lastUpdate').textContent = 'Error: ' + e.message;
+  }
+}
+
+// Serve dashboard from proxy
+initCharts();
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>
