@@ -1,3 +1,5 @@
+<img width="2984" height="1536" alt="image" src="https://github.com/user-attachments/assets/c05a6067-3caa-44a8-9bfb-91227c480f8d" />
+
 # hermes-observatory
 
 > Framework-agnostic telemetry proxy for AI agents.
@@ -117,3 +119,4 @@ uvicorn proxy.proxy:app --host 0.0.0.0 --port 1235 --reload
 ## Related
 
 **lg-evals** — LangGraph + MCP telemetry evaluation system. Measures graph coverage, edge transitions, and tool routing across runs. Found and fixed a structural coverage gap (executor→synthesizer never triggered), reducing latency 52%.
+
